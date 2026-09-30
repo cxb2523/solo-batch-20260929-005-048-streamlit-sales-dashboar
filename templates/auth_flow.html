@@ -1,0 +1,116 @@
+{% extends "base.html" %}
+{% block title %}/auth-flow 认证时间线{% endblock %}
+{% block body %}
+<h1>认证调用时间线 <span class="muted">/auth-flow</span></h1>
+
+<div class="twocol">
+  <section class="card">
+    <h2>① 密钥来源</h2>
+    <p>
+      状态：
+      {% if key_state.status == "ready" %}
+        <span class="pill ok">已就绪</span>
+      {% elif key_state.status == "corrupt" %}
+        <span class="pill err">文件损坏</span>
+      {% else %}
+        <span class="pill warn">缺失</span>
+      {% endif %}
+      来源：<strong>{{ key_state.key_source }}</strong>
+    </p>
+    {% if key_state.status == "ready" %}
+    <table>
+      <tr><th>当前 kid</th><td><code>{{ key_state.current.key_id }}</code></td></tr>
+      <tr><th>载入时间</th><td>{{ fmt_ts(key_state.current.loaded_at) }}</td></tr>
+      <tr><th>来源细节</th><td>{{ key_state.detail }}</td></tr>
+      <tr><th>宽限旧密钥数</th><td>{{ key_state.grace|length }}（旧密钥保留 {{ settings.grace_seconds // 3600 }} 小时验签）</td></tr>
+    </table>
+    {% else %}
+      <div class="banner {{ 'err' if key_state.status == 'corrupt' else 'warn' }}">
+        {% if key_state.status == "corrupt" %}
+          密钥文件无法解析：{{ key_state.detail }}
+        {% else %}
+          没有找到密钥：{{ key_state.detail }}
+        {% endif %}
+      </div>
+      <form method="post" action="{{ url_for('make_key') }}">
+        <button type="submit">立即生成密钥（原子落盘）</button>
+      </form>
+    {% endif %}
+    {% if key_state.status == "ready" and key_state.grace %}
+    <h2 style="margin-top:16px;">宽限期旧密钥</h2>
+    <table><thead><tr><th>kid</th><th>退役时间</th><th>宽限剩余</th></tr></thead><tbody>
+      {% for row in key_state.grace_rows() %}
+      <tr>
+        <td><code>{{ row.kid }}</code></td>
+        <td>{{ fmt_ts(row.retired_at) }}</td>
+        <td>{{ fmt_dur(row.remaining) }}</td>
+      </tr>
+      {% endfor %}
+    </tbody></table>
+    {% endif %}
+    <form method="post" action="{{ url_for('rotate_key') }}" style="margin-top:14px;">
+      <button class="ghost" type="submit">轮换密钥（原子替换，旧密钥留 24h 宽限）</button>
+    </form>
+  </section>
+
+  <section class="card">
+    <h2>② 凭据剩余有效期</h2>
+    {% if remaining %}
+      <p><span class="pill ok">凭据有效</span> 用户 <strong>{{ verification.username }}</strong></p>
+      <table>
+        <tr><th>滑动窗口剩余</th><td><strong>{{ remaining.sliding }}</strong> 秒（{{ fmt_dur(remaining.sliding) }}）</td></tr>
+        <tr><th>绝对到期剩余</th><td><strong>{{ remaining.absolute }}</strong> 秒（{{ fmt_dur(remaining.absolute) }}）</td></tr>
+        <tr><th>实际可用（取小）</th><td><strong>{{ remaining.effective }}</strong> 秒</td></tr>
+        <tr><th>签发 kid</th><td><code>{{ verification.key_id }}</code>（{{ "旧密钥宽限" if (verification.originally_signed_by or verification.signed_by) == "grace" else "当前密钥" }}）</td></tr>
+        <tr><th>签发时间</th><td>{{ fmt_ts(verification.issued_at) }}</td></tr>
+      </table>
+      <p class="muted">每次请求通过校验后滑动窗口向后推满 {{ settings.sliding_window }} 秒，但绝不晚于绝对到期。</p>
+    {% else %}
+      <p>
+        {% if not has_cookie %}<span class="pill warn">未携带凭据</span>{% else %}<span class="pill err">凭据无效或已过期</span>{% endif %}
+      </p>
+      <p class="muted">
+        {% if verification and verification.reason == "sliding_expired" %}滑动窗口已超时，需要重新登录。
+        {% elif verification and verification.reason == "absolute_expired" %}已达绝对到期，需要重新登录。
+        {% elif verification %}凭据被拒绝：{{ verification.reason }}
+        {% else %}登录后此栏显示滑动/绝对剩余有效期。{% endif %}
+      </p>
+      <a href="{{ url_for('login') }}"><button type="button">去登录</button></a>
+    {% endif %}
+  </section>
+</div>
+
+<section class="card">
+  <h2>调用时间线（最近 {{ events|length }} 条，新的在上）</h2>
+  <table>
+    <thead><tr><th>#</th><th>时间</th><th>函数</th><th>结果</th><th>明细</th></tr></thead>
+    <tbody>
+    {% for ev in events %}
+      <tr>
+        <td>{{ ev.seq }}</td>
+        <td>{{ fmt_ts(ev.ts) }}</td>
+        <td><code>{{ ev.function }}</code></td>
+        <td>
+          {% if ev.outcome in ["校验通过", "校验通过并滑动续期", "凭据已签发", "落盘密钥生效", "外部密钥生效", "生成入口已生成并落盘", "首次启动自生成并落盘", "损坏密钥已备份并重新生成", "原子替换完成，旧密钥进入宽限", "主动登出"] %}
+            <span class="pill ok">{{ ev.outcome }}</span>
+          {% elif "登出" in ev.outcome or "超时" in ev.outcome or "到期" in ev.outcome %}
+            <span class="pill warn">{{ ev.outcome }}</span>
+          {% elif "拒绝" in ev.outcome or "篡改" in ev.outcome or "损坏" in ev.outcome or "错误" in ev.outcome %}
+            <span class="pill err">{{ ev.outcome }}</span>
+          {% else %}
+            <span class="pill info">{{ ev.outcome }}</span>
+          {% endif %}
+        </td>
+        <td class="muted">
+          {% for k, v in ev.detail.items() %}
+            <div><code>{{ k }}</code>={{ v }}</div>
+          {% endfor %}
+        </td>
+      </tr>
+    {% else %}
+      <tr><td colspan="5" class="muted">还没有调用记录。登录、轮换密钥或刷新页面后会在这里出现。</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endblock %}

@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block title %}销售看板{% endblock %}
+{% block body %}
+<h1>销售概览</h1>
+<div class="card">
+  <div class="muted">
+    当前用户 <strong>{{ username }}</strong> ·
+    {% if signed_by == "grace" %}
+      <span class="pill warn">旧密钥宽限期内验签</span>
+    {% else %}<span class="pill ok">当前密钥验签</span>{% endif %}
+    · 剩余有效期（滑动 / 绝对）：
+    <strong>{{ remaining.sliding }}</strong> 秒 / <strong>{{ remaining.absolute }}</strong> 秒
+  </div>
+</div>
+<div class="kpis">
+  <div class="card kpi"><div class="muted">总销售额</div><div class="num">US $ {{ "{:,}".format(totals.total_sales) }}</div></div>
+  <div class="card kpi"><div class="muted">平均评分</div><div class="num">{{ totals.avg_rating }}</div></div>
+  <div class="card kpi"><div class="muted">笔均销售额</div><div class="num">US $ {{ totals.avg_transaction }}</div></div>
+</div>
+<div class="card">
+  <h2>各城市销售额（前 1000 行）</h2>
+  <table><thead><tr><th>城市</th><th>销售额</th></tr></thead><tbody>
+  {% for city, value in by_city.items() %}
+    <tr><td>{{ city }}</td><td>US $ {{ "{:,.0f}".format(value) }}</td></tr>
+  {% endfor %}
+  </tbody></table>
+</div>
+{% endblock %}

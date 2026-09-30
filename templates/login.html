@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}登录 · 销售看板{% endblock %}
+{% block body %}
+<div class="card" style="max-width:460px;margin:40px auto;">
+  <h1>登录</h1>
+  {% if key_state.status != "ready" %}
+    <div class="banner warn">
+      {% if key_state.status == "corrupt" %}
+        检测到签名密钥文件已损坏（{{ key_state.detail }}）。为避免直接 500，请先生成新密钥，旧会话将无法继续验签。
+      {% else %}
+        尚未配置签名密钥。多副本部署建议用环境变量 <code>{{ key_env }}</code> 注入共享密钥；本机演示可直接点击生成并落盘。
+      {% endif %}
+    </div>
+    <form method="post" action="{{ url_for('make_key') }}">
+      <button type="submit">立即生成密钥</button>
+    </form>
+    <p class="muted" style="margin-top:14px;">生成后回到本页输入账号密码登录。</p>
+  {% else %}
+    <p class="muted">密钥已就绪（{{ key_state.key_source }}，kid <code>{{ key_state.current.key_id }}</code>）。</p>
+    <form method="post">
+      <label>用户名</label>
+      <input name="username" autocomplete="username" autofocus required>
+      <label>密码</label>
+      <input name="password" type="password" autocomplete="current-password" required>
+      <div style="margin-top:16px;"><button type="submit">登录</button></div>
+    </form>
+    <p class="muted" style="margin-top:12px;">演示账号：pparker / abc123</p>
+  {% endif %}
+  {% if error %}<div class="banner err" style="margin-top:14px;">{{ error }}</div>{% endif %}
+</div>
+{% endblock %}

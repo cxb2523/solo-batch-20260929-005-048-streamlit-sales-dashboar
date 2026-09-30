@@ -1,0 +1,8 @@
+# 自生成的签名密钥与密钥备份绝不进版本库（泄漏面控制）
+instance/
+*.corrupt.*
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/

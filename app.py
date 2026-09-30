@@ -1,149 +1,228 @@
-import pickle
+"""Flask 版销售看板：登录门禁由 auth/session.py 的四个函数承担。
+
+启动：python -m flask --app app run
+页面：/login、/（看板，需登录）、/auth-flow（时间线回放）、/rotate-key
+"""
+
+from __future__ import annotations
+
+from datetime import datetime
 from pathlib import Path
 
-import pandas as pd  # pip install pandas openpyxl
-import plotly.express as px  # pip install plotly-express
-import streamlit as st  # pip install streamlit
-import streamlit_authenticator as stauth  # pip install streamlit-authenticator
+import pandas as pd
+from flask import (
+    Flask,
+    Response,
+    g,
+    redirect,
+    render_template,
+    request,
+    url_for,
+)
+
+from auth.session import (
+    AuthFlowLog,
+    end_session,
+    generate_secret_key,
+    get_settings,
+    init_app,
+    issue_credential,
+    load_secret_key,
+    protect_request,
+    rotate_secret_key,
+)
+from auth.users import authenticate
+
+PUBLIC_PATHS = {"/login", "/auth-flow", "/generate-key", "/healthz"}
 
 
-# emojis: https://www.webfx.com/tools/emoji-cheat-sheet/
-st.set_page_config(page_title="Sales Dashboard", page_icon=":bar_chart:", layout="wide")
+def create_app(config: dict | None = None) -> Flask:
+    app = Flask(__name__)
+    app.config.update(
+        SECRET_KEY="flask-side-messages",
+        AUTH_KEY_ENV_VAR="SALES_SECRET_KEY",
+        AUTH_KEY_FILE=str(Path(__file__).parent / "instance" / "secret_keys.json"),
+        AUTH_COOKIE_NAME="session_token",
+        AUTH_COOKIE_SECURE=False,
+        AUTH_SLIDING_WINDOW=30 * 60,
+        AUTH_ABSOLUTE_WINDOW=12 * 60 * 60,
+        AUTH_GRACE_SECONDS=24 * 60 * 60,
+        AUTH_AUTO_GENERATE_KEY=False,
+    )
+    if config:
+        app.config.update(config)
+    init_app(app)
 
-
-# --- USER AUTHENTICATION ---
-names = ["Peter Parker", "Rebecca Miller"]
-usernames = ["pparker", "rmiller"]
-
-# load hashed passwords
-file_path = Path(__file__).parent / "hashed_pw.pkl"
-with file_path.open("rb") as file:
-    hashed_passwords = pickle.load(file)
-
-authenticator = stauth.Authenticate(names, usernames, hashed_passwords,
-    "sales_dashboard", "abcdef", cookie_expiry_days=30)
-
-name, authentication_status, username = authenticator.login("Login", "main")
-
-if authentication_status == False:
-    st.error("Username/password is incorrect")
-
-if authentication_status == None:
-    st.warning("Please enter your username and password")
-
-if authentication_status:
-    # ---- READ EXCEL ----
-    @st.cache
-    def get_data_from_excel():
-        df = pd.read_excel(
-            io="supermarkt_sales.xlsx",
-            engine="openpyxl",
-            sheet_name="Sales",
-            skiprows=3,
-            usecols="B:R",
-            nrows=1000,
+    @app.before_request
+    def login_gate() -> Response | None:
+        decision = protect_request(
+            cookie_token=request.cookies.get(get_settings().cookie_name),
+            public_paths=PUBLIC_PATHS,
+            path=request.path,
         )
-        # Add 'hour' column to dataframe
-        df["hour"] = pd.to_datetime(df["Time"], format="%H:%M:%S").dt.hour
-        return df
+        g.key_state = decision["state"]
+        g.verification = decision["verification"]
+        g.clear_cookie = decision["clear_cookie"]
+        if decision["allow"]:
+            return None
+        return redirect(decision["redirect"])
 
-    df = get_data_from_excel()
+    @app.after_request
+    def apply_cookie(response: Response) -> Response:
+        if getattr(g, "clear_cookie", None):
+            response.delete_cookie(g.clear_cookie)
+        verification = getattr(g, "verification", None)
+        if verification is not None and verification.ok and verification.renewed:
+            response.set_cookie(
+                get_settings().cookie_name,
+                verification.renewed_credential.token,
+                max_age=get_settings().absolute_window,
+                httponly=True,
+                secure=get_settings().cookie_secure,
+                samesite="Lax",
+            )
+        return response
 
-    # ---- SIDEBAR ----
-    authenticator.logout("Logout", "sidebar")
-    st.sidebar.title(f"Welcome {name}")
-    st.sidebar.header("Please Filter Here:")
-    city = st.sidebar.multiselect(
-        "Select the City:",
-        options=df["City"].unique(),
-        default=df["City"].unique()
+    @app.route("/login", methods=["GET", "POST"])
+    def login():
+        state = load_secret_key()
+        error = None
+        if request.method == "POST":
+            if not state.ready:
+                error = "签名密钥尚未就绪，请先生成密钥。"
+            else:
+                username = request.form.get("username", "").strip()
+                password = request.form.get("password", "")
+                display_name = authenticate(username, password)
+                if display_name is None:
+                    AuthFlowLog.instance().record(
+                        "login", "账号或密码错误", username=username, rejected=True
+                    )
+                    error = "用户名或密码错误。"
+                else:
+                    credential = issue_credential(username, state)
+                    response = redirect(request.args.get("next") or url_for("dashboard"))
+                    response.set_cookie(
+                        get_settings().cookie_name,
+                        credential.token,
+                        max_age=get_settings().absolute_window,
+                        httponly=True,
+                        secure=get_settings().cookie_secure,
+                        samesite="Lax",
+                    )
+                    g.display_name = display_name
+                    return response
+        return render_template(
+            "login.html",
+            key_state=state,
+            key_env=get_settings().key_env_var,
+            error=error,
+        )
+
+    @app.post("/logout")
+    def logout():
+        verification = getattr(g, "verification", None)
+        username = verification.username if verification else None
+        end_session("logout", username)
+        response = redirect(url_for("login"))
+        response.delete_cookie(get_settings().cookie_name)
+        return response
+
+    @app.post("/generate-key")
+    def make_key():
+        generate_secret_key()
+        return redirect(url_for("auth_flow"))
+
+    @app.post("/rotate-key")
+    def rotate_key():
+        rotate_secret_key()
+        return redirect(url_for("auth_flow"))
+
+    @app.route("/healthz")
+    def healthz():
+        return {"ok": True, "key": g.key_state.status}
+
+    @app.route("/")
+    def dashboard():
+        verification = g.verification
+        state = g.key_state
+        frame = _load_sales()
+        totals = {
+            "total_sales": int(frame["Total"].sum()),
+            "avg_rating": round(frame["Rating"].mean(), 1),
+            "avg_transaction": round(frame["Total"].mean(), 2),
+            "rows": len(frame),
+        }
+        by_city = (
+            frame.groupby("City")["Total"].sum().round(0).sort_values(ascending=False)
+        )
+        return render_template(
+            "dashboard.html",
+            username=verification.username,
+            remaining=verification.remaining(get_settings().now()),
+            signed_by=verification.originally_signed_by or verification.signed_by,
+            key_state=state,
+            totals=totals,
+            by_city=by_city.to_dict(),
+        )
+
+    @app.route("/auth-flow")
+    def auth_flow():
+        settings = get_settings()
+        state = getattr(g, "key_state", None) or load_secret_key(settings)
+        verification = getattr(g, "verification", None)
+        token = request.cookies.get(settings.cookie_name)
+        remaining = None
+        if verification is not None and verification.ok:
+            remaining = verification.remaining(settings.now())
+        events = AuthFlowLog.instance().events()
+        return render_template(
+            "auth_flow.html",
+            key_state=state,
+            events=events,
+            remaining=remaining,
+            verification=verification,
+            has_cookie=bool(token),
+            settings=settings,
+            fmt_ts=_fmt_ts,
+            fmt_dur=_fmt_dur,
+        )
+
+    return app
+
+
+def _fmt_ts(ts):
+    if ts is None:
+        return "-"
+    return datetime.fromtimestamp(float(ts)).strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _fmt_dur(seconds):
+    seconds = int(seconds)
+    hours, rem = divmod(seconds, 3600)
+    minutes, secs = divmod(rem, 60)
+    if hours:
+        return f"{hours}小时{minutes}分{secs}秒"
+    if minutes:
+        return f"{minutes}分{secs}秒"
+    return f"{secs}秒"
+
+
+def _load_sales() -> pd.DataFrame:
+    path = Path(__file__).parent / "supermarkt_sales.xlsx"
+    frame = pd.read_excel(
+        path,
+        engine="openpyxl",
+        sheet_name="Sales",
+        skiprows=3,
+        usecols="B:R",
+        nrows=1000,
     )
-
-    customer_type = st.sidebar.multiselect(
-        "Select the Customer Type:",
-        options=df["Customer_type"].unique(),
-        default=df["Customer_type"].unique(),
-    )
-
-    gender = st.sidebar.multiselect(
-        "Select the Gender:",
-        options=df["Gender"].unique(),
-        default=df["Gender"].unique()
-    )
-
-    df_selection = df.query(
-        "City == @city & Customer_type ==@customer_type & Gender == @gender"
-    )
-
-    # ---- MAINPAGE ----
-    st.title(":bar_chart: Sales Dashboard")
-    st.markdown("##")
-
-    # TOP KPI's
-    total_sales = int(df_selection["Total"].sum())
-    average_rating = round(df_selection["Rating"].mean(), 1)
-    star_rating = ":star:" * int(round(average_rating, 0))
-    average_sale_by_transaction = round(df_selection["Total"].mean(), 2)
-
-    left_column, middle_column, right_column = st.columns(3)
-    with left_column:
-        st.subheader("Total Sales:")
-        st.subheader(f"US $ {total_sales:,}")
-    with middle_column:
-        st.subheader("Average Rating:")
-        st.subheader(f"{average_rating} {star_rating}")
-    with right_column:
-        st.subheader("Average Sales Per Transaction:")
-        st.subheader(f"US $ {average_sale_by_transaction}")
-
-    st.markdown("""---""")
-
-    # SALES BY PRODUCT LINE [BAR CHART]
-    sales_by_product_line = (
-        df_selection.groupby(by=["Product line"]).sum()[["Total"]].sort_values(by="Total")
-    )
-    fig_product_sales = px.bar(
-        sales_by_product_line,
-        x="Total",
-        y=sales_by_product_line.index,
-        orientation="h",
-        title="<b>Sales by Product Line</b>",
-        color_discrete_sequence=["#0083B8"] * len(sales_by_product_line),
-        template="plotly_white",
-    )
-    fig_product_sales.update_layout(
-        plot_bgcolor="rgba(0,0,0,0)",
-        xaxis=(dict(showgrid=False))
-    )
-
-    # SALES BY HOUR [BAR CHART]
-    sales_by_hour = df_selection.groupby(by=["hour"]).sum()[["Total"]]
-    fig_hourly_sales = px.bar(
-        sales_by_hour,
-        x=sales_by_hour.index,
-        y="Total",
-        title="<b>Sales by hour</b>",
-        color_discrete_sequence=["#0083B8"] * len(sales_by_hour),
-        template="plotly_white",
-    )
-    fig_hourly_sales.update_layout(
-        xaxis=dict(tickmode="linear"),
-        plot_bgcolor="rgba(0,0,0,0)",
-        yaxis=(dict(showgrid=False)),
-    )
+    return frame
 
 
-    left_column, right_column = st.columns(2)
-    left_column.plotly_chart(fig_hourly_sales, use_container_width=True)
-    right_column.plotly_chart(fig_product_sales, use_container_width=True)
+app = create_app()
 
 
-    # ---- HIDE STREAMLIT STYLE ----
-    hide_st_style = """
-                <style>
-                #MainMenu {visibility: hidden;}
-                footer {visibility: hidden;}
-                header {visibility: hidden;}
-                </style>
-                """
-    st.markdown(hide_st_style, unsafe_allow_html=True)
+if __name__ == "__main__":
+    app.run(debug=True)

@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}销售看板{% endblock %}</title>
+  <style>
+    :root { --blue:#0083B8; --ink:#102333; --muted:#5b7183; --ok:#1a7f4b; --warn:#b35900; --err:#b02a2a; }
+    * { box-sizing: border-box; }
+    body { margin:0; font-family:"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif; background:#f4f7fa; color:var(--ink); }
+    nav { display:flex; align-items:center; gap:16px; padding:12px 24px; background:#00172B; color:#fff; }
+    nav a { color:#cfe6f2; text-decoration:none; }
+    nav .brand { font-weight:700; color:#fff; margin-right:auto; }
+    .wrap { max-width:1080px; margin:24px auto; padding:0 24px; }
+    .card { background:#fff; border:1px solid #dce5ec; border-radius:10px; padding:20px 22px; margin-bottom:20px; box-shadow:0 1px 2px rgba(16,35,51,.05); }
+    h1 { font-size:22px; margin:0 0 12px; } h2 { font-size:16px; margin:0 0 12px; }
+    .muted { color:var(--muted); font-size:13px; }
+    .pill { display:inline-block; padding:2px 10px; border-radius:999px; font-size:12px; font-weight:600; }
+    .pill.ok { background:#e2f4ea; color:var(--ok); } .pill.warn { background:#fdf0dd; color:var(--warn); }
+    .pill.err { background:#fbe6e6; color:var(--err); } .pill.info { background:#e3f0f8; color:#0b5b86; }
+    table { width:100%; border-collapse:collapse; font-size:13px; }
+    th,td { text-align:left; padding:8px 10px; border-bottom:1px solid #e7edf2; vertical-align:top; }
+    th { background:#f7fafc; color:var(--muted); font-weight:600; }
+    .kpis { display:grid; grid-template-columns:repeat(3,1fr); gap:16px; }
+    .kpi .num { font-size:28px; font-weight:700; margin-top:6px; }
+    form.inline { display:inline; }
+    button { background:var(--blue); color:#fff; border:0; border-radius:6px; padding:9px 16px; font-size:14px; cursor:pointer; }
+    button.ghost { background:#eef3f7; color:var(--ink); }
+    input { padding:9px 10px; border:1px solid #c5d2dc; border-radius:6px; font-size:14px; width:100%; }
+    label { display:block; font-size:13px; color:var(--muted); margin:10px 0 4px; }
+    .banner { padding:10px 14px; border-radius:8px; margin-bottom:14px; font-size:14px; }
+    .banner.err { background:#fbe6e6; color:var(--err); } .banner.warn { background:#fdf0dd; color:var(--warn); }
+    .twocol { display:grid; grid-template-columns:1fr 1fr; gap:20px; align-items:start; }
+    code { background:#f0f4f7; padding:1px 5px; border-radius:4px; }
+  </style>
+</head>
+<body>
+  <nav>
+    <span class="brand">📊 销售看板（Flask 版）</span>
+    <a href="{{ url_for('dashboard') }}">看板</a>
+    <a href="{{ url_for('auth_flow') }}">/auth-flow</a>
+    <form class="inline" method="post" action="{{ url_for('logout') }}">
+      <button class="ghost" type="submit">登出</button>
+    </form>
+  </nav>
+  <main class="wrap">{% block body %}{% endblock %}</main>
+</body>
+</html>
