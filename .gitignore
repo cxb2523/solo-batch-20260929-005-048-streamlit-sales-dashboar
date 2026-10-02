@@ -1,0 +1,4 @@
+# 会话密钥落盘文件：不进版本库，避免泄漏面扩大
+auth/secret_keys.json
+__pycache__/
+.pytest_cache/

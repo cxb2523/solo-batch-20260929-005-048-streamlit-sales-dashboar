@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="zh">
+<head>
+  <meta charset="utf-8">
+  <title>Sales Dashboard</title>
+  <style>
+    body { font-family: "Segoe UI", sans-serif; background: #0e1117; color: #eee; margin: 2rem; }
+    a { color: #58a6ff; }
+    .card { background: #1b1f27; border-radius: 12px; padding: 1.5rem 2rem; max-width: 640px; }
+    dt { color: #8b949e; } dd { margin: 0 0 .8rem; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>&#128202; Sales Dashboard（受门禁保护）</h1>
+    <dl>
+      <dt>当前用户</dt><dd>{{ username }}</dd>
+      <dt>验签密钥</dt><dd>{{ key_used }}</dd>
+      <dt>凭据剩余有效期</dt><dd>{{ remaining }}</dd>
+    </dl>
+    <p>
+      <a href="{{ url_for('auth_flow') }}">查看 /auth-flow 调用时间线</a> ·
+      <a href="{{ url_for('logout') }}">退出登录</a>
+    </p>
+    <p>完整数据看板（Streamlit 版）：<code>streamlit run streamlit_app.py</code></p>
+  </div>
+</body>
+</html>

@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="zh">
+<head>
+  <meta charset="utf-8">
+  <title>登录 - Sales Dashboard</title>
+  <style>
+    body { font-family: "Segoe UI", sans-serif; background: #0e1117; color: #eee;
+           display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; }
+    .card { background: #1b1f27; padding: 2rem 2.5rem; border-radius: 12px; width: 320px;
+            box-shadow: 0 8px 30px rgba(0,0,0,.4); }
+    h1 { font-size: 1.3rem; margin-top: 0; }
+    input { width: 100%; padding: .55rem; margin: .3rem 0 .9rem; border-radius: 6px;
+            border: 1px solid #333; background: #0e1117; color: #eee; box-sizing: border-box; }
+    button { width: 100%; padding: .6rem; border: 0; border-radius: 6px;
+             background: #0083B8; color: #fff; font-weight: 600; cursor: pointer; }
+    .error { color: #ff6b6b; margin-bottom: .8rem; }
+    .hint { color: #8b949e; font-size: .8rem; margin-top: 1rem; }
+  </style>
+</head>
+<body>
+  <form class="card" method="post">
+    <h1>&#128202; Sales Dashboard 登录</h1>
+    {% if error %}<div class="error">{{ error }}</div>{% endif %}
+    <label>用户名</label>
+    <input name="username" autocomplete="username" required>
+    <label>密码</label>
+    <input name="password" type="password" autocomplete="current-password" required>
+    <button type="submit">登录</button>
+    <div class="hint">演示账号：{% for u in users %}{{ u }}{% if not loop.last %} / {% endif %}{% endfor %}，密码 sales123</div>
+  </form>
+</body>
+</html>

@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="zh">
+<head>
+  <meta charset="utf-8">
+  <title>/auth-flow 调用时间线</title>
+  <style>
+    body { font-family: "Segoe UI", sans-serif; background: #0e1117; color: #eee; margin: 2rem; }
+    h1 { font-size: 1.4rem; }
+    table { border-collapse: collapse; width: 100%; margin: 1rem 0 2rem; }
+    th, td { border: 1px solid #30363d; padding: .5rem .7rem; text-align: left; font-size: .9rem; }
+    th { background: #161b22; }
+    td.func { font-family: Consolas, monospace; color: #79c0ff; }
+    .ok { color: #3fb950; } .bad { color: #ff6b6b; } .warn { color: #d29922; }
+    .card { background: #1b1f27; border-radius: 12px; padding: 1rem 1.5rem; margin-bottom: 1.2rem; }
+    button { padding: .5rem 1rem; border: 0; border-radius: 6px; background: #0083B8;
+             color: #fff; font-weight: 600; cursor: pointer; }
+    form { display: inline-block; margin-right: .8rem; }
+    a { color: #58a6ff; }
+    code { background: #161b22; padding: .1rem .35rem; border-radius: 4px; }
+  </style>
+</head>
+<body>
+  <h1>&#9201; /auth-flow —— 登录门禁调用时间线</h1>
+
+  {% if not keys_ok %}
+  <div class="card">
+    <p class="bad"><strong>密钥缺失或损坏。</strong>门禁不会抛 500，点击下方按钮自生成密钥并原子落盘：</p>
+    <form method="post" action="{{ url_for('auth_generate_key') }}">
+      <button type="submit">生成密钥（自生成落盘）</button>
+    </form>
+  </div>
+  {% endif %}
+
+  <table>
+    <thead>
+      <tr>
+        <th>时间</th><th>调用</th><th>结果</th><th>密钥来源</th><th>凭据剩余有效期</th><th>说明</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for e in events %}
+      <tr>
+        <td>{{ e.time }}</td>
+        <td class="func">{{ e.func }}</td>
+        <td class="{{ 'ok' if e.status in ('OK', 'valid', 'valid-grace', 'renewed', '续期签发') else ('warn' if e.status in ('跳过',) else 'bad') }}">{{ e.status }}</td>
+        <td>{{ e.key_source }}</td>
+        <td>{{ e.remaining }}</td>
+        <td>{{ e.detail }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <div class="card">
+    <h2>三处互相咬住的决策</h2>
+    <ul>
+      <li><strong>密钥来源</strong>：优先外部环境源 <code>AUTH_SECRET_KEY</code>（多副本签名互认）；
+        否则自生成原子落盘 <code>auth/secret_keys.json</code>（已 .gitignore，不进版本库）。</li>
+      <li><strong>滑动 + 绝对双时钟</strong>：滑动窗口 {{ sliding }}，绝对上限 {{ absolute }}；
+        剩余有效期取两者较小值，续期只在验签与有效期校验通过后发生。</li>
+      <li><strong>轮换</strong>：原子替换密钥文件，旧密钥留 {{ grace }} 宽限期仅验签不签发。</li>
+    </ul>
+    {% if keys_ok %}
+    <form method="post" action="{{ url_for('auth_rotate_key') }}">
+      <button type="submit">轮换密钥（原子替换 + 旧密钥宽限）</button>
+    </form>
+    {% endif %}
+    <a href="{{ url_for('index') }}">返回首页</a>
+  </div>
+</body>
+</html>
